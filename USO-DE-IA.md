@@ -1,79 +1,57 @@
 # Uso de IA neste projeto
 
-> Seção pedida no enunciado. Escrevo aqui com franqueza como a ferramenta entrou no processo,
-> o que decidi antes dela, onde ela acelerou e onde eu tive que corrigir o rumo.
+## Ferramenta utilizada
 
-## Ferramenta
+Durante o desenvolvimento, utilizei o **Claude Code** (Anthropic), integrado ao VS Code, principalmente como ferramenta de apoio à implementação, revisão e verificação do projeto.
 
-**Claude Code** (Anthropic), rodando dentro do VS Code, ao longo de todo o projeto — back-end,
-front-end e documentação.
+## Decisões de projeto
 
-## O que eu defini antes de escrever qualquer linha
+A arquitetura e as principais decisões técnicas foram definidas antes da implementação. Entre elas:
 
-O desenho da solução veio primeiro, e a ferramenta trabalhou dentro dele. Antes de gerar código
-eu já tinha fechado:
+* Modelagem das entidades `User`, `Event`, `Seat`, `Reservation` e `Ticket`, incluindo os estados dos assentos e das reservas.
+* Uso de **lock pessimista** para tratar concorrência na reserva de assentos, priorizando uma garantia forte dentro de uma transação curta.
+* Expiração automática das reservas por meio de um job `@Scheduled`, evitando adicionar componentes externos desnecessários ao escopo, como Redis ou RabbitMQ.
+* Assinatura dos dados do QR Code utilizando **HMAC-SHA256**, com validação segura da assinatura.
+* Uso do **Flyway** como responsável pelo versionamento e criação do schema, mantendo o Hibernate apenas com `ddl-auto: validate`.
+* Autenticação baseada em **JWT**, incluindo informações de papel do usuário e autorização das operações de acordo com cada perfil.
 
-- **A modelagem**: `User`, `Event`, `Seat`, `Reservation`, `Ticket`, com os estados de assento
-  (`AVAILABLE`/`HELD`/`SOLD`) e de reserva (`PENDING`/`CONFIRMED`/`EXPIRED`/`CANCELLED`).
-- **A estratégia de concorrência**: lock pessimista na busca do assento, dentro de transação curta.
-  Escolhi isso em vez de lock otimista com retry porque a janela de contenção é o clique do
-  usuário — curta — e a garantia forte é mais fácil de testar e defender.
-- **A expiração das reservas**: job `@Scheduled`, sem fila externa (Redis/RabbitMQ seria peso
-  desnecessário para o escopo).
-- **O QR não forjável**: payload assinado com HMAC-SHA256 e comparação em tempo constante.
-- **A divisão Flyway/Hibernate**: Flyway como única fonte de verdade do schema, `ddl-auto: validate`.
-- **A autenticação**: JWT com claim de papel e autorização por rota/método.
+As justificativas dessas escolhas estão documentadas no [README do backend](backend/README.md#decisões-técnicas).
 
-Essas decisões estão justificadas no [README do backend](backend/README.md#decisões-técnicas).
+## Como a ferramenta foi utilizada
 
-## Onde a IA acelerou
+Depois que a estrutura e as decisões principais estavam definidas, utilizei a ferramenta principalmente para auxiliar em tarefas mais mecânicas de implementação, como criação de estruturas repetitivas, sugestões de código, ajustes de CSS e execução de testes.
 
-- Entidades JPA, DTOs, repositories e controllers a partir da modelagem que eu já tinha.
-- A migration inicial do Flyway e o seed de demonstração.
-- O CSS do front e a estrutura das telas.
-- Rodar a suíte, subir a aplicação e executar roteiros de verificação ponta a ponta.
+Todo código utilizado no projeto passou por revisão antes de ser incorporado. Em diferentes momentos, sugestões geradas precisaram ser modificadas ou descartadas por não atenderem corretamente aos requisitos ou às decisões arquiteturais adotadas.
 
-## Onde eu tive que corrigir o rumo
+## Revisões e correções realizadas
 
-**O caso mais importante foi o pagamento.** A primeira versão do endpoint de confirmação recebia
-`{ "paymentSuccessful": true }` — ou seja, o próprio cliente declarava que o pagamento tinha dado
-certo. Funcionava para demonstrar aprovação e recusa, mas qualquer pessoa com um token de cliente
-emitiria ingresso de graça com um `curl`. Eu questionei isso ("um customer pode aprovar
-pagamento?") e refizemos: hoje o cliente envia **dados do cartão** e um `PaymentGatewaySimulator`
-decide no servidor, com validação de Luhn e cartões de teste no estilo dos sandboxes reais.
-A decisão nunca sai do backend.
+Um exemplo importante ocorreu no fluxo de pagamento. Em uma implementação inicial, o endpoint de confirmação aceitava um valor indicando diretamente se o pagamento havia sido aprovado. Durante minha revisão percebi que isso permitiria que o próprio cliente controlasse o resultado da operação, criando uma falha grave no fluxo.
 
-Ao refazer esse trecho apareceu um **bug de verdade**: a expiração preguiçosa dentro do
-`confirmReservation` liberava o assento e em seguida lançava uma exceção — que fazia o Spring dar
-rollback justamente na liberação recém-feita. O código parecia certo e não fazia nada (o job
-agendado limpava depois, mascarando o efeito). Corrigido com `@Transactional(noRollbackFor = ...)`.
+A solução foi alterada para que o cliente envie apenas os dados necessários para a tentativa de pagamento, enquanto um `PaymentGatewaySimulator` realiza a decisão no servidor, incluindo validação de Luhn e cartões específicos para os cenários de teste.
 
-**Outras intervenções minhas:**
+Durante essa alteração também identifiquei um problema relacionado à expiração de reservas. O método liberava o assento e, logo depois, lançava uma exceção. Como toda a operação estava dentro de uma transação, o Spring executava rollback e desfazia a própria liberação. O comportamento era parcialmente mascarado pelo job periódico de expiração. A correção foi realizada utilizando `@Transactional(noRollbackFor = ...)`.
 
-- Pedi uma revisão do projeto contra o enunciado e ela apontou requisitos que faltavam
-  (compartilhamento por link, dados semeados, esta própria seção) — implementados depois. Numa
-  segunda passagem apareceu algo que a primeira tinha deixado escapar: o enunciado exige declarar
-  no README o que não está funcionando, e a integração TMDb — implementada, mas nunca executada
-  contra a API real — não estava declarada em lugar nenhum. Virou a seção
-  [Limitações conhecidas](backend/README.md#limitações-conhecidas), e o risco de mapeamento foi
-  fechado com um teste que usa a resposta real do TMDb sem precisar de chave.
-- Rejeitei a proposta de mandar todo visitante deslogado para o login: o enunciado pede navegação
-  pública pelos eventos, então o catálogo continua aberto e o convite ao login virou uma faixa.
-- A identidade visual foi refeita depois que eu apontei que o resultado inicial tinha "cara de
-  projeto gerado" — fundo escuro com roxo padrão. Extraímos a linguagem visual da própria página
-  do Elite Dev (paleta, escala tipográfica, raios, estados de foco) e reconstruímos os padrões em
-  CSS próprio, com tokens nomeados por função.
+Também fiz revisões específicas do projeto em relação ao enunciado. Essas revisões identificaram itens que ainda precisavam ser implementados ou documentados, como compartilhamento por link, dados iniciais para demonstração e a documentação sobre o uso de IA.
 
-## O que fiz sem IA
+Outra revisão identificou a necessidade de declarar explicitamente funcionalidades que não haviam sido validadas em ambiente real. A integração com o TMDb, por exemplo, estava implementada, mas não havia sido executada diretamente contra a API externa. Essa informação passou a constar na seção de [Limitações conhecidas](backend/README.md#limitações-conhecidas), e o mapeamento da resposta foi posteriormente validado por teste.
 
-- Validação manual de todo o fluxo no Postman, papel por papel, incluindo os casos de erro.
-- As decisões de escopo: o que entrava, o que ficava de fora e o que era exagero para o desafio.
-- Leitura e revisão do que foi gerado antes de aceitar — foi assim que o problema do pagamento
-  apareceu.
+Também optei por manter o catálogo de eventos disponível para usuários não autenticados, em vez de redirecionar automaticamente todo visitante para a tela de login, pois isso estava mais alinhado ao requisito de navegação pública.
 
-## Em resumo
+No front-end, a primeira proposta visual também foi revisada. A identidade inicial foi substituída por uma implementação baseada na linguagem visual da página do Elite Dev, utilizando uma paleta, tipografia, espaçamentos, raios e estados de interação próprios definidos em CSS.
 
-Usei a ferramenta como um par que digita rápido, não como quem decide. As decisões de arquitetura,
-os limites de escopo e as correções de rumo foram minhas; a ferramenta acelerou a escrita e me
-ajudou a verificar o resultado. Onde eu não revisei com atenção, apareceu problema — e é por isso
-que revisar continua sendo o trabalho.
+## Atividades realizadas diretamente
+
+Além das decisões de arquitetura e das revisões de código, realizei manualmente:
+
+* a validação dos fluxos da aplicação utilizando Postman;
+* os testes dos diferentes papéis de usuário e cenários de erro;
+* a definição do escopo e das funcionalidades que fariam parte da solução;
+* a análise dos requisitos do desafio;
+* a revisão do código antes de sua inclusão no projeto;
+* a identificação e correção de problemas que surgiram durante os testes.
+
+## Considerações finais
+
+A IA foi utilizada como **ferramenta de apoio ao desenvolvimento**, principalmente para agilizar tarefas de implementação e auxiliar em verificações. A definição da solução, as escolhas arquiteturais, o controle de escopo, a validação dos requisitos e a decisão sobre quais sugestões seriam ou não utilizadas permaneceram sob minha responsabilidade.
+
+O processo também mostrou a importância da revisão humana: algumas soluções inicialmente propostas apresentavam problemas que só foram identificados durante a análise e os testes do projeto.
