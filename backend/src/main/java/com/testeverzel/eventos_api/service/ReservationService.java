@@ -3,7 +3,6 @@ package com.testeverzel.eventos_api.service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -17,10 +16,13 @@ import com.testeverzel.eventos_api.domain.Ticket;
 import com.testeverzel.eventos_api.domain.enums.ReservationStatus;
 import com.testeverzel.eventos_api.domain.enums.SeatStatus;
 import com.testeverzel.eventos_api.exception.InvalidReservationStateException;
+import com.testeverzel.eventos_api.exception.PaymentDeclinedException;
 import com.testeverzel.eventos_api.exception.ReservationExpiredException;
 import com.testeverzel.eventos_api.exception.ReservationNotFoundException;
 import com.testeverzel.eventos_api.exception.SeatNotAvailableException;
 import com.testeverzel.eventos_api.exception.SeatNotFoundException;
+import com.testeverzel.eventos_api.payment.PaymentGatewaySimulator;
+import com.testeverzel.eventos_api.payment.PaymentResult;
 import com.testeverzel.eventos_api.repository.ReservationRepository;
 import com.testeverzel.eventos_api.repository.SeatRepository;
 import com.testeverzel.eventos_api.repository.TicketRepository;
@@ -35,6 +37,7 @@ public class ReservationService {
     private final TicketRepository ticketRepository;
     private final UserRepository userRepository;
     private final QrCodeSigner qrCodeSigner;
+    private final PaymentGatewaySimulator paymentGateway;
     private final Duration holdDuration;
 
     public ReservationService(
@@ -43,12 +46,14 @@ public class ReservationService {
             TicketRepository ticketRepository,
             UserRepository userRepository,
             QrCodeSigner qrCodeSigner,
+            PaymentGatewaySimulator paymentGateway,
             @Value("${app.reservation.hold-duration}") Duration holdDuration) {
         this.seatRepository = seatRepository;
         this.reservationRepository = reservationRepository;
         this.ticketRepository = ticketRepository;
         this.userRepository = userRepository;
         this.qrCodeSigner = qrCodeSigner;
+        this.paymentGateway = paymentGateway;
         this.holdDuration = holdDuration;
     }
 
@@ -74,9 +79,10 @@ public class ReservationService {
         return reservationRepository.save(reservation);
     }
 
-    // Empty result = payment declined; reservation stays PENDING so the customer can retry before the hold expires.
-    @Transactional
-    public Optional<Ticket> confirmReservation(UUID reservationId, UUID userId, boolean paymentSuccessful) {
+    // noRollbackFor keeps the lazy expiration below committed; without it the throw would undo the
+    // very release it just performed. A declined payment mutates nothing, so it rolls back harmlessly.
+    @Transactional(noRollbackFor = { ReservationExpiredException.class, PaymentDeclinedException.class })
+    public Ticket confirmReservation(UUID reservationId, UUID userId, String cardNumber) {
         Reservation reservation = reservationRepository.findByIdForUpdate(reservationId)
                 .orElseThrow(() -> new ReservationNotFoundException(reservationId));
 
@@ -95,11 +101,14 @@ public class ReservationService {
             throw new InvalidReservationStateException(reservationId, reservation.getStatus());
         }
 
-        if (!paymentSuccessful) {
-            return Optional.empty();
+        Seat seat = reservation.getSeat();
+
+        // The outcome comes from the gateway, never from the caller.
+        PaymentResult payment = paymentGateway.charge(cardNumber, seat.getEvent().getPrecoBase());
+        if (!payment.approved()) {
+            throw new PaymentDeclinedException(payment.declineReason());
         }
 
-        Seat seat = reservation.getSeat();
         reservation.setStatus(ReservationStatus.CONFIRMED);
         seat.setStatus(SeatStatus.SOLD);
 
@@ -112,7 +121,29 @@ public class ReservationService {
                 .qrCodeHash(qrCodeHash)
                 .build();
 
-        return Optional.of(ticketRepository.save(ticket));
+        return ticketRepository.save(ticket);
+    }
+
+    /**
+     * Desistência antes do pagamento: devolve o assento ao estoque na hora, sem esperar a expiração.
+     * Só reservas pendentes podem ser canceladas — depois de confirmada existe um ingresso emitido,
+     * e desfazer isso exigiria estorno, que está fora do escopo.
+     */
+    @Transactional
+    public void cancelReservation(UUID reservationId, UUID userId) {
+        Reservation reservation = reservationRepository.findByIdForUpdate(reservationId)
+                .orElseThrow(() -> new ReservationNotFoundException(reservationId));
+
+        if (!reservation.getUser().getId().equals(userId)) {
+            throw new ReservationNotFoundException(reservationId);
+        }
+
+        if (reservation.getStatus() != ReservationStatus.PENDING) {
+            throw new InvalidReservationStateException(reservationId, reservation.getStatus());
+        }
+
+        reservation.setStatus(ReservationStatus.CANCELLED);
+        reservation.getSeat().setStatus(SeatStatus.AVAILABLE);
     }
 
     @Scheduled(fixedDelayString = "${app.reservation.expiration-sweep-interval-ms}")

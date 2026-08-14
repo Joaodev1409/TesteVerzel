@@ -53,6 +53,14 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    // The decline reason doubles as the machine-readable code so the checkout screen can explain why.
+    @ExceptionHandler(PaymentDeclinedException.class)
+    public ProblemDetail handlePaymentDeclined(PaymentDeclinedException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.PAYMENT_REQUIRED, e.getMessage());
+        problem.setProperty("code", e.getReason().name());
+        return problem;
+    }
+
     @ExceptionHandler(BadCredentialsException.class)
     public ProblemDetail handleBadCredentials(BadCredentialsException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, e.getMessage());

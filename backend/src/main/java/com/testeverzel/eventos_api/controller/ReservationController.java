@@ -1,11 +1,8 @@
 package com.testeverzel.eventos_api.controller;
 
-import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ProblemDetail;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -50,19 +47,18 @@ public class ReservationController {
     }
 
     @PostMapping("/{reservationId}/confirm")
-    public ResponseEntity<Object> confirm(@AuthenticationPrincipal Jwt jwt,
+    public TicketResponse confirm(@AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID reservationId,
             @Valid @RequestBody ConfirmReservationRequest request) {
-        Optional<Ticket> ticket = reservationService.confirmReservation(
-                reservationId, UUID.fromString(jwt.getSubject()), request.paymentSuccessful());
+        Ticket ticket = reservationService.confirmReservation(
+                reservationId, UUID.fromString(jwt.getSubject()), request.cardNumber());
+        return toResponse(ticket);
+    }
 
-        if (ticket.isEmpty()) {
-            ProblemDetail problem = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.PAYMENT_REQUIRED,
-                    "Payment declined; reservation is still pending and can be retried until it expires");
-            return ResponseEntity.of(problem).build();
-        }
-        return ResponseEntity.ok(toResponse(ticket.get()));
+    @PostMapping("/{reservationId}/cancel")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID reservationId) {
+        reservationService.cancelReservation(reservationId, UUID.fromString(jwt.getSubject()));
     }
 
     private TicketResponse toResponse(Ticket ticket) {
