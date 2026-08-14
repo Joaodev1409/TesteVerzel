@@ -35,6 +35,13 @@ docker compose up -d
 .\mvnw.cmd spring-boot:run    # Windows
 ```
 
+Alternativa em um comando só, com a API também em container (mais lento na primeira vez, porque
+compila a imagem):
+
+```bash
+docker compose --profile full up --build
+```
+
 A API sobe em `http://localhost:8080`.
 
 ### Variáveis de ambiente (opcionais em dev)
@@ -64,6 +71,7 @@ Envie o token nas demais rotas: `Authorization: Bearer <token>`.
 | Método | Rota | Acesso | Descrição |
 |---|---|---|---|
 | POST | `/api/events` | ORGANIZER | Cria evento; assentos gerados a partir de `fileiras: [{ "fileira": "A", "quantidade": 5 }]` |
+| PUT | `/api/events/{id}` | ORGANIZER (dono) | Edita título, sinopse, data, local e preço; o mapa de assentos não muda |
 | GET | `/api/events` | público | Lista eventos |
 | GET | `/api/events/{id}` | público | Detalhe do evento |
 | GET | `/api/events/{id}/seats` | público | Mapa de assentos com status (`AVAILABLE` / `HELD` / `SOLD`) |
@@ -73,8 +81,10 @@ Envie o token nas demais rotas: `Authorization: Bearer <token>`.
 | Método | Rota | Acesso | Descrição |
 |---|---|---|---|
 | POST | `/api/reservations` | CUSTOMER | `{ "eventId", "seatId" }` → reserva `PENDING` com `expiresAt` (10 min) |
-| POST | `/api/reservations/{id}/confirm` | CUSTOMER | `{ "paymentSuccessful": true\|false }` — `true` emite o ingresso com QR; `false` → `402` e a reserva segue `PENDING` para retry |
+| POST | `/api/reservations/{id}/confirm` | CUSTOMER | `{ "cardNumber": "4242 4242 4242 4242" }` — o servidor simula o gateway e decide; aprovado emite o ingresso com QR, recusado → `402` e a reserva segue `PENDING` para retry |
+| POST | `/api/reservations/{id}/cancel` | CUSTOMER | Desiste de uma reserva pendente e devolve o assento ao estoque na hora (`204`); reserva já confirmada → `409` |
 | GET | `/api/me/tickets` | CUSTOMER | Ingressos do usuário logado, com QR code e status de uso |
+| GET | `/api/tickets/shared/{qrCode}` | **público** | Abre um ingresso a partir do código do QR — é o que sustenta o compartilhamento por link |
 | GET | `/api/me/events` | ORGANIZER | Eventos criados pelo organizador logado |
 | POST | `/api/gate/validate` | GATE | `{ "qrCode", "expectedEventId"? }` → dados do ingresso e marca `usedAt`; com `expectedEventId`, ingresso de outro evento → `409 WRONG_EVENT` |
 
@@ -90,7 +100,7 @@ Envie o token nas demais rotas: `Authorization: Bearer <token>`.
 |---|---|
 | Assento já reservado/vendido | `409` |
 | Reserva expirada | `410` (assento volta a `AVAILABLE`) |
-| Pagamento recusado | `402` |
+| Pagamento recusado | `402` + `code: CARD_DECLINED` \| `INSUFFICIENT_FUNDS` \| `INVALID_CARD` |
 | QR adulterado/forjado | `422` + `code: INVALID_QR` |
 | Ingresso já utilizado (re-scan) | `409` + `code: TICKET_ALREADY_USED` |
 | Ingresso de outro evento na portaria | `409` + `code: WRONG_EVENT` |
@@ -108,13 +118,43 @@ Erros seguem o formato [Problem Details (RFC 7807)](https://datatracker.ietf.org
 
 **Expiração de reservas** — job `@Scheduled` varre reservas `PENDING` vencidas e libera os assentos (sem fila externa; fora do escopo). O confirm também expira lazily: reserva vencida que ainda não foi varrida é expirada na hora, nunca confirmada. Confirmação e expiração usam lock pessimista na reserva para não se atropelarem (lost update).
 
+**Pagamento simulado, decidido no servidor** — o cliente envia o número do cartão, nunca o resultado. Um `PaymentGatewaySimulator` valida o cartão (comprimento + algoritmo de Luhn) e decide o desfecho a partir de cartões de teste, no estilo dos sandboxes de gateway reais: `4242 4242 4242 4242` aprova, `4000 0000 0000 0002` recusa, `4000 0000 0000 9995` retorna saldo insuficiente. Um booleano `paymentSuccessful` vindo do cliente seria mais simples, mas deixaria qualquer cliente autenticado emitir ingressos de graça — a decisão precisa nascer no servidor. Numa integração real, esta classe é substituída pelo gateway (ou pelo webhook de confirmação) sem mexer no resto do fluxo.
+
 **QR code não forjável** — conteúdo do QR é `base64url(ticketId:eventId:seatId:hmac)`, com HMAC-SHA256 sobre os três ids usando secret da aplicação. A portaria recalcula e compara com `MessageDigest.isEqual` (constante no tempo, evita timing attack). Validação usa lock pessimista no ticket: dois scans simultâneos do mesmo QR não passam ambos. `usedAt` preenchido = ingresso queimado.
 
-**Schema** — Flyway é o único dono do schema (`ddl-auto: validate`); migrations versionadas em `src/main/resources/db/migration`.
+**Compartilhamento por link** — o link é `/ingresso/<código do QR>`, e o endpoint que o alimenta é público por definição: quem recebe não tem conta. A assinatura HMAC é verificada **antes** de qualquer consulta ao banco, então um link adulterado nunca chega a tocar em dados. Vale dizer com clareza qual é o trade-off: **o link é o ingresso** — quem tiver a URL consegue entrar, exatamente como acontece ao encaminhar um PDF de ingresso por e-mail. O que limita o estrago é a validação de uso único na portaria. Num sistema real, o passo seguinte seria transferência nominal (o link vincula o ingresso a outra conta em vez de valer por si).
+
+**Cancelamento** — só reservas `PENDING` podem ser canceladas; o assento volta a `AVAILABLE` imediatamente, sem esperar o job de expiração. Reserva confirmada tem ingresso emitido, e desfazer isso exigiria estorno — fora do escopo, então responde `409`.
+
+**Schema** — Flyway é o único dono do schema (`ddl-auto: validate`); migrations versionadas em `src/main/resources/db/migration`. A `V2` semeia os dados de demonstração (usuários, eventos e assentos, sem reservas) para que a aplicação suba pronta para avaliação.
 
 **Autenticação** — JWT HS256 emitido/validado pelo próprio Spring Security (OAuth2 Resource Server), sem biblioteca externa. Claim `role` vira authority; autorização por rota e `@PreAuthorize` por método.
 
 **IDs** — UUIDs em todas as entidades: ids sequenciais seriam adivinháveis em recursos expostos (tickets, reservas).
+
+## Limitações conhecidas
+
+Declaradas de propósito, para que ninguém descubra sozinho:
+
+- **A integração com o TMDb nunca foi executada contra a API real**, por não haver chave à mão.
+  O mapeamento da resposta está coberto por teste (`TmdbClientTest`) usando o JSON real de
+  `/search/movie`, então erro de campo está descartado; o que permanece sem prova é o caminho de
+  rede e autenticação. Sem `TMDB_API_KEY` — o estado padrão deste repositório — o endpoint responde
+  `503` com mensagem explicativa. O restante do produto não depende dela: o organizador preenche
+  título e sinopse manualmente e o `tmdbId` é opcional.
+- **O organizador edita os dados do evento, mas não exclui um evento existente.** O mapa de
+  assentos também não muda na edição, de propósito: alterar fileiras depois de vendas mudaria o
+  lugar de quem já comprou.
+- **O mapa de assentos se atualiza por consulta periódica (a cada 5s), não por push.** É suficiente
+  para o uso real e mantém o servidor simples; a evolução natural seria SSE ou WebSocket para
+  propagar o estado sem polling.
+- **Só reservas pendentes podem ser canceladas.** Cancelar uma reserva já confirmada exigiria
+  estorno e invalidação do ingresso — fora do escopo combinado.
+- **O link de compartilhamento é o próprio ingresso**: quem tiver a URL consegue entrar. É o mesmo
+  comportamento de encaminhar um PDF por e-mail, e o que limita o estrago é a validação de uso
+  único na portaria.
+- **Os segredos têm valores padrão de desenvolvimento** no `application.yaml` para facilitar a
+  avaliação local. Em produção, `JWT_SECRET` e `QR_CODE_SECRET` precisam vir do ambiente.
 
 ## Testes
 
@@ -122,7 +162,8 @@ Erros seguem o formato [Problem Details (RFC 7807)](https://datatracker.ietf.org
 ./mvnw test
 ```
 
-Requer Docker rodando: `ReservationServiceConcurrencyTest` sobe um PostgreSQL efêmero via Testcontainers, aplica as migrations reais e dispara **10 threads simultâneas** (sincronizadas por `CyclicBarrier`) tentando reservar o mesmo assento — exatamente 1 deve conseguir e 9 devem falhar com `SeatNotAvailableException`. É a prova concreta de que o lock pessimista funciona, não só teoria.
+- `ReservationServiceConcurrencyTest` sobe um PostgreSQL efêmero via Testcontainers (**requer Docker rodando**), aplica as migrations reais e dispara **10 threads simultâneas** (sincronizadas por `CyclicBarrier`) tentando reservar o mesmo assento — exatamente 1 deve conseguir e 9 devem falhar com `SeatNotAvailableException`. É a prova concreta de que o lock pessimista funciona, não só teoria.
+- `TmdbClientTest` valida o contrato com a API externa sem rede nem chave, usando o JSON real de `/search/movie`: mapeamento dos campos, query e chave enviadas, erro claro quando a chave falta e propagação de falha do upstream.
 
 ## Estrutura
 
@@ -145,6 +186,6 @@ src/main/java/com/testeverzel/eventos_api/
 2. Com o token ORGANIZER, `POST /api/events` com título, data futura, `precoBase` e `fileiras`.
 3. Sem token, `GET /api/events/{id}/seats` — copie o id de um assento `AVAILABLE`.
 4. Com o token CUSTOMER, `POST /api/reservations` com `eventId` + `seatId`.
-5. `POST /api/reservations/{id}/confirm` com `{ "paymentSuccessful": true }` — receba o `qrCode`.
+5. `POST /api/reservations/{id}/confirm` com `{ "cardNumber": "4242 4242 4242 4242" }` — receba o `qrCode`. Para ver a recusa, use `4000 0000 0000 0002`.
 6. Com o token GATE, `POST /api/gate/validate` com o `qrCode` — retorna evento/assento e marca uso.
 7. Repita o passo 6 → `409`. Altere um caractere do `qrCode` → `422`.
