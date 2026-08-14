@@ -10,6 +10,28 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eventos -d eventos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Só sobe com `docker compose --profile full up`, para o fluxo padrão de
+  # desenvolvimento (banco no Docker, API no Maven) continuar rápido.
+  api:
+    profiles: ["full"]
+    build: .
+    container_name: eventos-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/eventos
+      SPRING_DATASOURCE_USERNAME: eventos
+      SPRING_DATASOURCE_PASSWORD: eventos
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+    ports:
+      - "8080:8080"
 
 volumes:
   pgdata:
