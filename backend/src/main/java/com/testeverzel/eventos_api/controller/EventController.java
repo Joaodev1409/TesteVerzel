@@ -10,6 +10,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.testeverzel.eventos_api.dto.CreateEventRequest;
 import com.testeverzel.eventos_api.dto.EventResponse;
 import com.testeverzel.eventos_api.dto.SeatResponse;
+import com.testeverzel.eventos_api.dto.UpdateEventRequest;
 import com.testeverzel.eventos_api.service.EventService;
 
 import jakarta.validation.Valid;
@@ -37,6 +39,13 @@ public class EventController {
     @ResponseStatus(HttpStatus.CREATED)
     public EventResponse create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateEventRequest request) {
         return eventService.create(UUID.fromString(jwt.getSubject()), request);
+    }
+
+    @PutMapping("/{eventId}")
+    @PreAuthorize("hasRole('ORGANIZER')")
+    public EventResponse update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID eventId,
+            @Valid @RequestBody UpdateEventRequest request) {
+        return eventService.update(eventId, UUID.fromString(jwt.getSubject()), request);
     }
 
     @GetMapping

@@ -13,6 +13,7 @@ import com.testeverzel.eventos_api.domain.enums.SeatStatus;
 import com.testeverzel.eventos_api.dto.CreateEventRequest;
 import com.testeverzel.eventos_api.dto.EventResponse;
 import com.testeverzel.eventos_api.dto.SeatResponse;
+import com.testeverzel.eventos_api.dto.UpdateEventRequest;
 import com.testeverzel.eventos_api.exception.EventNotFoundException;
 import com.testeverzel.eventos_api.repository.EventRepository;
 import com.testeverzel.eventos_api.repository.SeatRepository;
@@ -57,6 +58,26 @@ public class EventService {
                                 .build()))
                 .toList();
         seatRepository.saveAll(seats);
+
+        return EventResponse.from(event);
+    }
+
+    @Transactional
+    public EventResponse update(UUID eventId, UUID organizerId, UpdateEventRequest request) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new EventNotFoundException(eventId));
+
+        // Evento de outro organizador responde "não encontrado" para não revelar que o id existe.
+        if (!event.getOrganizer().getId().equals(organizerId)) {
+            throw new EventNotFoundException(eventId);
+        }
+
+        event.setTitulo(request.titulo());
+        event.setSinopse(request.sinopse());
+        event.setData(request.data());
+        event.setLocal(request.local());
+        event.setPrecoBase(request.precoBase());
+        event.setTmdbId(request.tmdbId());
 
         return EventResponse.from(event);
     }
