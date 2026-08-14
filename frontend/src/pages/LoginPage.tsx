@@ -36,7 +36,9 @@ export function LoginPage() {
 
   return (
     <div className="page page-narrow">
+      <span className="eyebrow">Acesso</span>
       <h1>Entrar</h1>
+      <p className="muted">Use a conta que você criou para comprar, organizar ou validar ingressos.</p>
       <form className="card form" onSubmit={handleSubmit}>
         {error && <div className="alert alert-error">{error}</div>}
         <label>

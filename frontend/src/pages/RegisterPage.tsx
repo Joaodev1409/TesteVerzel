@@ -41,7 +41,9 @@ export function RegisterPage() {
 
   return (
     <div className="page page-narrow">
+      <span className="eyebrow">Cadastro</span>
       <h1>Criar conta</h1>
+      <p className="muted">Leva menos de um minuto. O tipo de conta define o que você enxerga.</p>
       <form className="card form" onSubmit={handleSubmit}>
         {error && <div className="alert alert-error">{error}</div>}
         <label>

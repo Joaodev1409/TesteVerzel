@@ -113,7 +113,10 @@ export function GatePage() {
 
   return (
     <div className="page">
-      <h1>Portaria</h1>
+      <div>
+        <span className="eyebrow">Entrada</span>
+        <h1>Portaria</h1>
+      </div>
 
       <div className="card gate-setup">
         <label>

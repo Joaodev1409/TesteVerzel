@@ -1,0 +1,100 @@
+/*
+ * Design tokens — linguagem visual da plataforma.
+ * Nomeados por função (o que fazem), nunca por aparência.
+ * Escala base de espaçamento: 4px. Tema escuro único e assumido.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- superfícies ---------------------------------------------------- */
+  --bg: #000104; /* preto levemente azulado — fundo da aplicação */
+  --surface: #05070c; /* painéis e cards */
+  --surface-raised: #0b0e14; /* linhas, itens de lista, inputs preenchidos */
+  --surface-overlay: rgba(5, 7, 12, 0.92); /* painel sobre imagem/backdrop */
+
+  /* ---- traços --------------------------------------------------------- */
+  --border: rgba(255, 255, 255, 0.1); /* divisórias e contornos de card */
+  --border-strong: rgba(255, 255, 255, 0.15); /* contorno de campo interativo */
+  --edge-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.06); /* brilho superior do vidro */
+
+  /* ---- texto ---------------------------------------------------------- */
+  --text: #fafafa;
+  --text-muted: #a1a1a1; /* apoio, descrições, metadados */
+  --text-faint: rgba(255, 255, 255, 0.5); /* eyebrows e rótulos micro */
+  --text-on-accent: #05070c; /* sobre o acento de ação */
+
+  /* ---- cores de intenção ---------------------------------------------- */
+  --accent: #ceff00; /* ação principal: reservar, pagar, validar */
+  --accent-soft: rgba(206, 255, 0, 0.12); /* halo do CTA */
+  --accent-hover: rgba(206, 255, 0, 0.45); /* borda em hover */
+  --focus: #7d72ff; /* anel de foco e estados interativos */
+  --focus-ring: rgba(125, 114, 255, 0.5);
+  --danger: #ff6568;
+  --danger-ring: rgba(255, 101, 104, 0.4);
+  --success: #7fc742;
+  --warning: #fbce07;
+  --info: #0ae1ff;
+
+  /* ---- tipografia ----------------------------------------------------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans',
+    Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+
+  --text-micro: 0.625rem; /* 10px — eyebrows em caixa alta */
+  --text-sm: 0.875rem; /* 14px — apoio, labels, corpo denso */
+  --text-base: 1rem; /* 16px — corpo */
+  --text-lg: 1.25rem; /* 20px — títulos de card */
+  --text-xl: 1.75rem; /* 28px — título de página */
+
+  --leading-none: 1;
+  --leading-snug: 1.375;
+  --leading-relaxed: 1.625;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --tracking-tight: -0.025em; /* títulos */
+  --tracking-wide: 0.3em; /* eyebrows em caixa alta */
+
+  /* ---- espaçamento (escala de 4px) ------------------------------------ */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-16: 4rem;
+
+  --container: 68rem; /* largura máxima do conteúdo da app */
+  --container-form: 28rem; /* coluna única de formulário */
+
+  /* ---- raios (diminuem conforme o elemento encolhe) -------------------- */
+  --radius-card: 24px;
+  --radius-action: 20px;
+  --radius-control: 8px;
+  --radius-pill: 999px;
+
+  /* ---- elevação ------------------------------------------------------- */
+  --shadow-raised: 0 12px 32px -12px rgba(0, 0, 0, 0.9);
+  --shadow-accent: 0 0 0 1px var(--accent-soft), var(--shadow-raised);
+  --glow-focus: 0 0 32px rgba(125, 114, 255, 0.35);
+
+  /* ---- controles ------------------------------------------------------ */
+  --control-height: 2.75rem; /* 44px — alvo de toque confortável */
+  --action-height: 3.5rem; /* 56px — CTA de página */
+
+  /* ---- movimento ------------------------------------------------------ */
+  --duration: 0.15s;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration: 0.01s;
+  }
+}

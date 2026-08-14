@@ -13,7 +13,7 @@ export function Navbar() {
   return (
     <header className="navbar">
       <Link to="/" className="navbar-brand">
-        🎟️ Eventos
+        Eventos &amp; Ingressos
       </Link>
       <nav className="navbar-links">
         <NavLink to="/">Eventos</NavLink>
