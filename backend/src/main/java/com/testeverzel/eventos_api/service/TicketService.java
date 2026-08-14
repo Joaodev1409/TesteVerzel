@@ -67,21 +67,40 @@ public class TicketService {
 
     @Transactional(readOnly = true)
     public List<MyTicketResponse> myTickets(UUID userId) {
-        return ticketRepository.findAllByUserId(userId).stream()
-                .map(ticket -> {
-                    Seat seat = ticket.getReservation().getSeat();
-                    Event event = seat.getEvent();
-                    return new MyTicketResponse(
-                            ticket.getId(),
-                            event.getId(),
-                            event.getTitulo(),
-                            event.getData(),
-                            event.getLocal(),
-                            seat.getFileira(),
-                            seat.getNumero(),
-                            qrCodeSigner.encodeQrCode(ticket.getId(), event.getId(), seat.getId()),
-                            ticket.getUsedAt());
-                })
-                .toList();
+        return ticketRepository.findAllByUserId(userId).stream().map(this::toResponse).toList();
+    }
+
+    /**
+     * Leitura pública de um ingresso a partir do próprio código do QR — é o que sustenta o
+     * compartilhamento por link. O código é verificado antes de qualquer acesso ao banco, então
+     * um link adulterado nunca chega a consultar dados.
+     */
+    @Transactional(readOnly = true)
+    public MyTicketResponse findShared(String qrCode) {
+        QrCodePayload payload = qrCodeSigner.decodeAndVerify(qrCode);
+
+        Ticket ticket = ticketRepository.findById(payload.ticketId())
+                .orElseThrow(InvalidQrCodeException::new);
+
+        if (!qrCodeSigner.isValid(payload.ticketId(), payload.eventId(), payload.seatId(),
+                ticket.getQrCodeHash())) {
+            throw new InvalidQrCodeException();
+        }
+        return toResponse(ticket);
+    }
+
+    private MyTicketResponse toResponse(Ticket ticket) {
+        Seat seat = ticket.getReservation().getSeat();
+        Event event = seat.getEvent();
+        return new MyTicketResponse(
+                ticket.getId(),
+                event.getId(),
+                event.getTitulo(),
+                event.getData(),
+                event.getLocal(),
+                seat.getFileira(),
+                seat.getNumero(),
+                qrCodeSigner.encodeQrCode(ticket.getId(), event.getId(), seat.getId()),
+                ticket.getUsedAt());
     }
 }
