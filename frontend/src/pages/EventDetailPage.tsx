@@ -10,6 +10,19 @@ type Step =
   | { kind: 'paying'; reservation: ReservationResponse; seat: SeatResponse }
   | { kind: 'done'; ticket: TicketResponse; seat: SeatResponse }
 
+// The server decides the outcome from the card number; these mirror the usual sandbox test cards.
+const TEST_CARDS = {
+  aprovado: '4242 4242 4242 4242',
+  recusado: '4000 0000 0000 0002',
+  semSaldo: '4000 0000 0000 9995',
+}
+
+const DECLINE_MESSAGES: Record<string, string> = {
+  CARD_DECLINED: 'Cartão recusado pela operadora.',
+  INSUFFICIENT_FUNDS: 'Saldo insuficiente no cartão.',
+  INVALID_CARD: 'Número de cartão inválido.',
+}
+
 export function EventDetailPage() {
   const { eventId } = useParams<{ eventId: string }>()
   const { auth } = useAuth()
@@ -19,6 +32,7 @@ export function EventDetailPage() {
   const [seats, setSeats] = useState<SeatResponse[] | null>(null)
   const [selected, setSelected] = useState<SeatResponse | null>(null)
   const [step, setStep] = useState<Step>({ kind: 'browsing' })
+  const [cardNumber, setCardNumber] = useState(TEST_CARDS.aprovado)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -36,6 +50,23 @@ export function EventDetailPage() {
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Erro ao carregar evento.'))
     loadSeats()
   }, [eventId, loadSeats])
+
+  // Enquanto o usuário escolhe, outra pessoa pode ocupar um lugar: o mapa se atualiza sozinho.
+  useEffect(() => {
+    if (step.kind !== 'browsing') return
+    const timer = window.setInterval(loadSeats, 5000)
+    return () => window.clearInterval(timer)
+  }, [step.kind, loadSeats])
+
+  // Se o assento selecionado foi ocupado por outra pessoa, avisa em vez de deixar clicar em vão.
+  useEffect(() => {
+    if (!selected || !seats) return
+    const atual = seats.find((seat) => seat.id === selected.id)
+    if (atual && atual.status !== 'AVAILABLE') {
+      setSelected(null)
+      setError('O assento que você tinha selecionado acabou de ser ocupado. Escolha outro.')
+    }
+  }, [seats, selected])
 
   const rows = useMemo(() => {
     if (!seats) return []
@@ -81,21 +112,42 @@ export function EventDetailPage() {
     }
   }
 
-  async function handlePayment(paymentSuccessful: boolean) {
+  async function handleCancel() {
+    if (step.kind !== 'paying' || !auth) return
+    setError(null)
+    setBusy(true)
+    try {
+      await api<void>(`/api/reservations/${step.reservation.id}/cancel`, {
+        method: 'POST',
+        token: auth.token,
+      })
+      setStep({ kind: 'browsing' })
+      setSelected(null)
+      loadSeats()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Erro ao cancelar a reserva.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handlePayment(e: React.FormEvent) {
+    e.preventDefault()
     if (step.kind !== 'paying' || !auth) return
     setError(null)
     setBusy(true)
     try {
       const ticket = await api<TicketResponse>(`/api/reservations/${step.reservation.id}/confirm`, {
         method: 'POST',
-        body: { paymentSuccessful },
+        body: { cardNumber },
         token: auth.token,
       })
       setStep({ kind: 'done', ticket, seat: step.seat })
       loadSeats()
     } catch (err) {
       if (err instanceof ApiError && err.status === 402) {
-        setError('Pagamento recusado (simulado). A reserva continua válida — tente pagar de novo antes de expirar.')
+        const motivo = DECLINE_MESSAGES[err.code ?? ''] ?? 'Pagamento recusado.'
+        setError(`${motivo} A reserva continua válida — tente outro cartão antes de expirar.`)
       } else if (err instanceof ApiError && err.status === 410) {
         setError('A reserva expirou. Escolha um assento novamente.')
         setStep({ kind: 'browsing' })
@@ -122,6 +174,7 @@ export function EventDetailPage() {
       <Link to="/" className="back-link">
         ← Voltar aos eventos
       </Link>
+      <span className="eyebrow">Escolha seu lugar</span>
       <h1>{event.titulo}</h1>
       <p className="muted">
         {formatDateTime(event.data)} · {event.local} · a partir de {formatPrice(event.precoBase)}
@@ -183,7 +236,7 @@ export function EventDetailPage() {
       )}
 
       {step.kind === 'paying' && (
-        <div className="card payment-card">
+        <form className="card payment-card form" onSubmit={handlePayment}>
           <h2>Pagamento (simulado)</h2>
           <p>
             Assento <strong>{step.seat.fileira}{step.seat.numero}</strong> ·{' '}
@@ -193,15 +246,46 @@ export function EventDetailPage() {
             Reserva válida até {formatDateTime(step.reservation.expiresAt)}. Se não pagar até lá, o
             assento volta a ficar livre.
           </p>
-          <div className="payment-actions">
-            <button className="btn btn-primary" disabled={busy} onClick={() => handlePayment(true)}>
-              Aprovar pagamento
-            </button>
-            <button className="btn btn-danger" disabled={busy} onClick={() => handlePayment(false)}>
-              Simular recusa
-            </button>
+
+          <label>
+            Número do cartão
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="0000 0000 0000 0000"
+              value={cardNumber}
+              onChange={(e) => setCardNumber(e.target.value)}
+              required
+            />
+          </label>
+
+          <p className="helper">
+            Cobrança simulada — nenhum dado real é processado. O servidor decide o resultado a
+            partir do cartão.
+          </p>
+
+          <div className="test-cards">
+            <span>Cartões de teste:</span>
+            {Object.entries(TEST_CARDS).map(([label, number]) => (
+              <button
+                key={label}
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setCardNumber(number)}
+              >
+                {label === 'semSaldo' ? 'sem saldo' : label}
+              </button>
+            ))}
           </div>
-        </div>
+
+          <button className="btn btn-primary btn-cta" disabled={busy}>
+            {busy ? 'Processando...' : `Pagar ${formatPrice(event.precoBase)}`}
+          </button>
+
+          <button type="button" className="btn btn-ghost" disabled={busy} onClick={handleCancel}>
+            Desistir e liberar o assento
+          </button>
+        </form>
       )}
 
       {step.kind === 'done' && (

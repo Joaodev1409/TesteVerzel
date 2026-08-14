@@ -10,6 +10,19 @@ export function MyTicketsPage() {
   const { auth } = useAuth()
   const [tickets, setTickets] = useState<MyTicketResponse[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+
+  async function share(ticket: MyTicketResponse) {
+    const url = `${window.location.origin}/ingresso/${encodeURIComponent(ticket.qrCode)}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedId(ticket.id)
+      window.setTimeout(() => setCopiedId(null), 2500)
+    } catch {
+      // clipboard bloqueado (contexto inseguro ou permissão negada): mostra o link para cópia manual
+      window.prompt('Copie o link do ingresso:', url)
+    }
+  }
 
   useEffect(() => {
     if (!auth) return
@@ -20,7 +33,10 @@ export function MyTicketsPage() {
 
   return (
     <div className="page">
-      <h1>Meus ingressos</h1>
+      <div>
+        <span className="eyebrow">Carteira</span>
+        <h1>Meus ingressos</h1>
+      </div>
       {error && <div className="alert alert-error">{error}</div>}
       {!error && tickets === null && <p className="muted">Carregando...</p>}
       {tickets !== null && tickets.length === 0 && (
@@ -44,6 +60,10 @@ export function MyTicketsPage() {
               ) : (
                 <span className="badge badge-valid">Válido</span>
               )}
+
+              <button className="btn btn-ghost" onClick={() => share(ticket)}>
+                {copiedId === ticket.id ? 'Link copiado!' : 'Compartilhar'}
+              </button>
             </div>
             <div className="ticket-qr">
               <QRCodeSVG value={ticket.qrCode} size={140} marginSize={2} />

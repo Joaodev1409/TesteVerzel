@@ -4,6 +4,13 @@ import { useAuth } from '../auth/AuthContext'
 import type { CreateEventInput, EventResponse, MovieSummary, SeatRowInput } from '../api/types'
 import { formatDateTime, formatPrice } from '../format'
 
+/** `datetime-local` só aceita 'YYYY-MM-DDTHH:mm' no fuso local, sem offset. */
+function toDateTimeLocal(iso: string): string {
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 const EMPTY_FORM = {
   titulo: '',
   sinopse: '',
@@ -18,9 +25,31 @@ export function OrganizerPage() {
   const [myEvents, setMyEvents] = useState<EventResponse[] | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [fileiras, setFileiras] = useState<SeatRowInput[]>([{ fileira: 'A', quantidade: 10 }])
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  function resetForm() {
+    setForm(EMPTY_FORM)
+    setFileiras([{ fileira: 'A', quantidade: 10 }])
+    setEditingId(null)
+  }
+
+  function startEdit(event: EventResponse) {
+    setForm({
+      titulo: event.titulo,
+      sinopse: event.sinopse ?? '',
+      data: toDateTimeLocal(event.data),
+      local: event.local,
+      precoBase: String(event.precoBase),
+      tmdbId: event.tmdbId,
+    })
+    setEditingId(event.id)
+    setError(null)
+    setSuccess(null)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   const [tmdbQuery, setTmdbQuery] = useState('')
   const [tmdbResults, setTmdbResults] = useState<MovieSummary[] | null>(null)
@@ -87,26 +116,36 @@ export function OrganizerPage() {
     setSuccess(null)
     setBusy(true)
     try {
-      const body: CreateEventInput = {
+      const base = {
         titulo: form.titulo,
         sinopse: form.sinopse || null,
         data: new Date(form.data).toISOString(),
         local: form.local,
         precoBase: Number(form.precoBase),
         tmdbId: form.tmdbId,
-        fileiras,
       }
-      const created = await api<EventResponse>('/api/events', {
-        method: 'POST',
-        body,
-        token: auth.token,
-      })
-      setSuccess(`Evento "${created.titulo}" criado com ${created.capacidade} assentos.`)
-      setForm(EMPTY_FORM)
-      setFileiras([{ fileira: 'A', quantidade: 10 }])
+
+      if (editingId) {
+        const updated = await api<EventResponse>(`/api/events/${editingId}`, {
+          method: 'PUT',
+          body: base,
+          token: auth.token,
+        })
+        setSuccess(`Evento "${updated.titulo}" atualizado.`)
+      } else {
+        const body: CreateEventInput = { ...base, fileiras }
+        const created = await api<EventResponse>('/api/events', {
+          method: 'POST',
+          body,
+          token: auth.token,
+        })
+        setSuccess(`Evento "${created.titulo}" criado com ${created.capacidade} assentos.`)
+      }
+
+      resetForm()
       loadMyEvents()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Erro ao criar evento.')
+      setError(err instanceof ApiError ? err.message : 'Erro ao salvar evento.')
     } finally {
       setBusy(false)
     }
@@ -114,10 +153,13 @@ export function OrganizerPage() {
 
   return (
     <div className="page">
-      <h1>Painel do organizador</h1>
+      <div>
+        <span className="eyebrow">Bastidores</span>
+        <h1>Painel do organizador</h1>
+      </div>
 
       <section className="card">
-        <h2>Novo evento</h2>
+        <h2>{editingId ? 'Editar evento' : 'Novo evento'}</h2>
 
         <div className="tmdb-search">
           <label>
@@ -140,6 +182,7 @@ export function OrganizerPage() {
               </button>
             </div>
           </label>
+          <p className="helper">Preenche título e sinopse automaticamente. Pode ignorar e digitar na mão.</p>
           {tmdbError && <div className="alert alert-warn">{tmdbError}</div>}
           {tmdbResults && (
             <ul className="tmdb-results">
@@ -209,6 +252,12 @@ export function OrganizerPage() {
             </label>
           </div>
 
+          {editingId ? (
+            <p className="helper">
+              O mapa de assentos não muda na edição: alterar fileiras depois que existem reservas
+              mudaria o lugar de quem já comprou.
+            </p>
+          ) : (
           <fieldset className="rows-editor">
             <legend>Mapa de assentos ({totalSeats} assentos)</legend>
             {fileiras.map((row, index) => (
@@ -248,10 +297,18 @@ export function OrganizerPage() {
               + Adicionar fileira
             </button>
           </fieldset>
+          )}
 
-          <button className="btn btn-primary" disabled={busy}>
-            {busy ? 'Criando...' : 'Criar evento'}
-          </button>
+          <div className="form-actions">
+            <button className="btn btn-primary" disabled={busy}>
+              {busy ? 'Salvando...' : editingId ? 'Salvar alterações' : 'Criar evento'}
+            </button>
+            {editingId && (
+              <button type="button" className="btn btn-ghost" onClick={resetForm} disabled={busy}>
+                Cancelar edição
+              </button>
+            )}
+          </div>
         </form>
       </section>
 
@@ -273,6 +330,9 @@ export function OrganizerPage() {
               <div className="my-event-meta">
                 <span>{event.capacidade} assentos</span>
                 <span>{formatPrice(event.precoBase)}</span>
+                <button className="btn btn-ghost" onClick={() => startEdit(event)}>
+                  Editar
+                </button>
               </div>
             </div>
           ))}
